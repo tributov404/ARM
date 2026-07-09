@@ -1,12 +1,6 @@
 name: Windows 2022 RDP Full
 
-on:
-  workflow_dispatch:
-    inputs:
-      ngrok_token:
-        description: 'Ваш бесплатный Ngrok Authtoken (вставьте, чтобы туннель запустился)'
-        required: true
-        default: 'ЗАМЕНИТЕ_НА_ТОКЕН'
+on: workflow_dispatch
 
 jobs:
   rdp:
@@ -20,8 +14,8 @@ jobs:
           Write-Host "1. Обновление подсистемы WSL..."
           wsl --update
           
-          Write-Host "2. Установка программ (Telegram, VS Code, Podman, Ngrok)..."
-          choco install telegram vscode podman-cli googlechrome ngrok -y --no-progress --ignore-errors
+          Write-Host "2. Установка программ (Telegram, VS Code, Podman)..."
+          choco install telegram vscode podman-cli googlechrome -y --no-progress --ignore-errors
           
           Write-Host "3. Установка плагина podman-compose..."
           pip install podman-compose --quiet
@@ -39,29 +33,26 @@ jobs:
           $password = -join ((33..126) | Get-Random -Count 15 | % {[char]$_})
           net user runneradmin $password
           
-          Write-Host "7. Авторизация и запуск туннеля через Ngrok..."
-          # Применяем токен, который вы введете при запуске кнопкой
-          $token = "${{ github.event.inputs.ngrok_token }}"
-          ngrok config add-authtoken $token
+          Write-Host "7. Запуск туннеля через SSH (Pinggy) без токенов..."
+          # Запускаем фоновое SSH-подключение к pinggy.io для проброса TCP порта 3389
+          Start-Process -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:127.0.0.1:3389 a.pinggy.io" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
           
-          # Запуск туннеля
-          Start-Process -FilePath "ngrok" -ArgumentList "tcp 3389" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
-          
-          # Ожидаем запуск туннеля и получение адреса
+          # Ожидаем генерации публичного адреса
           $tunnelUrl = $null
           for ($i = 0; $i -lt 30; $i++) {
               Start-Sleep -Seconds 2
-              try {
-                  $response = Invoke-RestMethod -Uri "http://127.0.0"
-                  if ($response.tunnels.public_url) {
-                      $tunnelUrl = $response.tunnels.public_url -replace "tcp://", ""
+              if (Test-Path "tunnel.log") {
+                  $log = Get-Content "tunnel.log" -Raw
+                  # Ищем строку с адресом в выводе pinggy
+                  if ($log -match "tcp://(a\.pinggy\.link:\d+)") {
+                      $tunnelUrl = $matches[1]
                       break
                   }
-              } catch {}
+              }
           }
           
           if (-not $tunnelUrl) { 
-              Write-Error "Не удалось получить адрес туннеля. Проверьте правильность Authtoken!"
+              Write-Error "Не удалось поднять туннель через Pinggy."
               exit 1 
           }
 
