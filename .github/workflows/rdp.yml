@@ -1,47 +1,79 @@
-name: Windows 2022 Setup
+name: Windows 2022 RDP Full
 
 on:
   workflow_dispatch:
+    inputs:
+      ngrok_token:
+        description: 'Ваш бесплатный Ngrok Authtoken (вставьте, чтобы туннель запустился)'
+        required: true
+        default: 'ЗАМЕНИТЕ_НА_ТОКЕН'
 
 jobs:
-  setup:
-    runs-on: [self-hosted, windows]
-
+  rdp:
+    runs-on: windows-2022
     steps:
       - name: Deploy Environment
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "1. Updating WSL..."
+          $ErrorActionPreference = "SilentlyContinue"
+          
+          Write-Host "1. Обновление подсистемы WSL..."
           wsl --update
-
-          Write-Host "2. Installing software..."
-          choco install telegram vscode podman-cli googlechrome -y --no-progress
-
-          Write-Host "3. Installing podman-compose..."
-          python -m pip install --upgrade pip
-          python -m pip install podman-compose --quiet
-
-          Write-Host "4. Enabling RDP..."
-          Set-ItemProperty `
-            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-            -Name "fDenyTSConnections" `
-            -Value 0
-
+          
+          Write-Host "2. Установка программ (Telegram, VS Code, Podman, Ngrok)..."
+          choco install telegram vscode podman-cli googlechrome ngrok -y --no-progress --ignore-errors
+          
+          Write-Host "3. Установка плагина podman-compose..."
+          pip install podman-compose --quiet
+          
+          Write-Host "4. Настройка конфигурации RDP..."
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-
-          Set-ItemProperty `
-            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-            -Name "UserAuthentication" `
-            -Value 1
-
-          Write-Host "5. Configuring user password..."
-          net user runneradmin "${{ secrets.RDP_PASSWORD }}"
-
-          Write-Host "6. Starting Podman machine..."
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -value 0
+          
+          Write-Host "5. Запуск виртуальной машины Podman..."
           podman machine init
           podman machine start
+          
+          Write-Host "6. Настройка пользователя..."
+          $password = -join ((33..126) | Get-Random -Count 15 | % {[char]$_})
+          net user runneradmin $password
+          
+          Write-Host "7. Авторизация и запуск туннеля через Ngrok..."
+          # Применяем токен, который вы введете при запуске кнопкой
+          $token = "${{ github.event.inputs.ngrok_token }}"
+          ngrok config add-authtoken $token
+          
+          # Запуск туннеля
+          Start-Process -FilePath "ngrok" -ArgumentList "tcp 3389" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
+          
+          # Ожидаем запуск туннеля и получение адреса
+          $tunnelUrl = $null
+          for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 2
+              try {
+                  $response = Invoke-RestMethod -Uri "http://127.0.0"
+                  if ($response.tunnels.public_url) {
+                      $tunnelUrl = $response.tunnels.public_url -replace "tcp://", ""
+                      break
+                  }
+              } catch {}
+          }
+          
+          if (-not $tunnelUrl) { 
+              Write-Error "Не удалось получить адрес туннеля. Проверьте правильность Authtoken!"
+              exit 1 
+          }
 
-          Write-Host "Done."
-          Write-Host "::notice title=RDP Info::RDP enabled on self-hosted runner. User: runneradmin"
+          Write-Host "========================================================="
+          Write-Host "   Windows 2022 (Win 10 x64) успешно запущена!          "
+          Write-Host "========================================================="
+          Write-Host "Адрес для подключения:  $tunnelUrl"
+          Write-Host "Пользователь:           runneradmin"
+          Write-Host "Пароль:                 $password"
+          Write-Host "========================================================="
+          
+          Write-Host "::notice title=RDP Access Info::Host: $tunnelUrl | User: runneradmin | Pass: $password"
+          
+          # Удерживаем сессию открытой на 6 часов
+          Start-Sleep -Seconds 21600
