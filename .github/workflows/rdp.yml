@@ -9,40 +9,41 @@ jobs:
       - name: Deploy Environment
         shell: pwsh
         run: |
-          # Жестко отключаем остановку при любых системных предупреждениях
           $ErrorActionPreference = "SilentlyContinue"
           
-          Write-Host "1. Установка программ (Telegram, VS Code, Podman)..."
-          # Добавили --ignore-errors, чтобы сбой Chrome больше не ломал весь деплой
+          Write-Host "1. Обновление подсистемы WSL..."
+          # Принудительно обновляем ядро WSL, чтобы Podman смог создать Linux-окружение
+          wsl --update
+          
+          Write-Host "2. Установка программ (Telegram, VS Code, Podman)..."
           choco install telegram vscode podman-cli googlechrome -y --no-progress --ignore-errors
           
-          Write-Host "2. Установка плагина podman-compose..."
+          Write-Host "3. Установка плагина podman-compose..."
           pip install podman-compose --quiet
           
-          Write-Host "3. Настройка сетевого туннеля bore..."
+          Write-Host "4. Настройка сетевого туннеля bore..."
           if (Test-Path "bore.zip") { Remove-Item "bore.zip" -Force }
           if (Test-Path "bore.exe") { Remove-Item "bore.exe" -Force }
           
-          # Скачиваем утилиту
-          Invoke-WebRequest "https://github.com" -OutFile "bore.zip"
-          
-          # Распаковываем через нативный tar вместо Expand-Archive (это исключит ошибку OperationStopped)
+          # Скачиваем через curl.exe — это исключит повреждение архива
+          curl.exe -L -o bore.zip https://github.com
           tar -xf bore.zip
           
-          Write-Host "4. Настройка конфигурации RDP..."
+          Write-Host "5. Настройка конфигурации RDP..."
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -value 0
           
-          Write-Host "5. Запуск виртуальной машины Podman..."
+          Write-Host "6. Запуск виртуальной машины Podman..."
+          # После обновления WSL импорт Linux-дистрибутива пройдет без ошибок
           podman machine init
           podman machine start
           
-          Write-Host "6. Настройка пользователя..."
+          Write-Host "7. Настройка пользователя..."
           $password = -join ((33..126) | Get-Random -Count 15 | % {[char]$_})
           net user runneradmin $password
           
-          Write-Host "7. Запуск туннеля..."
+          Write-Host "8. Запуск туннеля..."
           Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
           
           $tunnelUrl = $null
@@ -72,5 +73,5 @@ jobs:
           
           Write-Host "::notice title=RDP Access Info::Host: $tunnelUrl | User: runneradmin | Pass: $password"
           
-          # Удерживаем сессию открытой на 6 часов
+          # Оставляем машину включенной на 6 часов
           Start-Sleep -Seconds 21600
