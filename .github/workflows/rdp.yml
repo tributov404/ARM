@@ -1,36 +1,49 @@
-name: Windows RDP Full
+name: Windows 2022 RDP Full
 
 on: workflow_dispatch
 
 jobs:
   rdp:
-    # Переключаемся на мощный x64 раннер, где проще запустить замену Docker
-    runs-on: windows-2025
+    # Используем стабильную x64 Windows (аналог Windows 10)
+    runs-on: windows-2022
     steps:
-      - name: Deploy
+      - name: Deploy Environment
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           
-          # Устанавливаем софт и Podman (замена Docker, работающая без Hyper-V в Windows)
+          # 1. Установка пользовательского софта и движка контейнеров Podman
+          Write-Host "Установка программ через Chocolatey..."
           choco install googlechrome telegram vscode podman-cli -y --no-progress
           
-          # Качаем правильную x86_64 версию bore
-          Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
+          # 2. Установка плагина для сборки docker-compose проектов через Python PIP
+          Write-Host "Установка плагина podman-compose..."
+          pip install podman-compose --quiet
+          
+          # 3. Скачивание утилиты туннелирования bore (x86_64)
+          Write-Host "Настройка сетевого туннеля bore..."
+          Invoke-WebRequest "https://github.com" -OutFile "bore.zip"
           Expand-Archive bore.zip -DestinationPath . -Force
           
-          # Включаем RDP
+          # 4. Включение и настройка службы Удаленного рабочего стола (RDP)
+          Write-Host "Настройка конфигурации RDP..."
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -value 0
           
-          # Генерируем пароль
+          # 5. Инициализация и запуск Linux-окружения Podman для работы контейнеров
+          Write-Host "Запуск виртуальной машины Podman..."
+          podman machine init
+          podman machine start
+          
+          # 6. Генерация случайного безопасного пароля для администратора
           $password = -join ((33..126) | Get-Random -Count 15 | % {[char]$_})
           net user runneradmin $password
           
-          # Запускаем туннель
+          # 7. Запуск туннеля для проброса порта RDP (3389) во внешнюю сеть
           Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
           
+          # Ожидание генерации публичного адреса утилитой bore
           $tunnelUrl = $null
           for ($i = 0; $i -lt 30; $i++) {
               Start-Sleep -Seconds 2
@@ -43,15 +56,22 @@ jobs:
               }
           }
           
-          if (-not $tunnelUrl) { exit 1 }
+          if (-not $tunnelUrl) { 
+              Write-Error "Не удалось поднять туннель через bore.pub"
+              exit 1 
+          }
 
-          Write-Host "===========  топчик 128 ядер ================"
-          Write-Host "адрес:      $tunnelUrl"
-          Write-Host "юзер:       runneradmin"
-          Write-Host "пароль:     $password"
-          Write-Host "============================================="
+          # Вывод данных для подключения в логи сборки GitHub Actions
+          Write-Host "========================================================="
+          Write-Host "   Windows 2022 (Win 10 x64) успешно запущена!          "
+          Write-Host "========================================================="
+          Write-Host "Адрес для подключения:  $tunnelUrl"
+          Write-Host "Пользователь:           runneradmin"
+          Write-Host "Пароль:                 $password"
+          Write-Host "========================================================="
           
-          Write-Host "::notice title=RDP Access::Host: $tunnelUrl | User: runneradmin | Pass: $password"
+          # Создание красивого баннера (Notice) на главной странице GitHub Workflow
+          Write-Host "::notice title=RDP Access Info::Host: $tunnelUrl | User: runneradmin | Pass: $password"
           
-          # Держим машину активной 6 часов
+          # Удержание сессии сервера активной в течение 6 часов (21600 секунд)
           Start-Sleep -Seconds 21600
