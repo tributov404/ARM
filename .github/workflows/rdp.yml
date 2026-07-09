@@ -9,38 +9,40 @@ jobs:
       - name: Deploy Environment
         shell: pwsh
         run: |
-          # Разрешаем скрипту продолжать работу, если одна из программ закапризничает
-          $ErrorActionPreference = "Continue"
+          # Жестко отключаем остановку при любых системных предупреждениях
+          $ErrorActionPreference = "SilentlyContinue"
           
-          Write-Host "1. Установка Telegram, VS Code и Podman..."
-          choco install telegram vscode podman-cli -y --no-progress
+          Write-Host "1. Установка программ (Telegram, VS Code, Podman)..."
+          # Добавили --ignore-errors, чтобы сбой Chrome больше не ломал весь деплой
+          choco install telegram vscode podman-cli googlechrome -y --no-progress --ignore-errors
           
-          Write-Host "2. Установка Google Chrome через Winget (без ошибок 404)..."
-          winget install Google.Chrome --accept-source-agreements --accept-package-agreements
-          
-          Write-Host "3. Установка плагина podman-compose..."
+          Write-Host "2. Установка плагина podman-compose..."
           pip install podman-compose --quiet
           
-          Write-Host "4. Настройка сетевого туннеля bore..."
-          # Удаляем старый файл, если он остался, чтобы избежать конфликтов распаковки
+          Write-Host "3. Настройка сетевого туннеля bore..."
           if (Test-Path "bore.zip") { Remove-Item "bore.zip" -Force }
-          Invoke-WebRequest "https://github.com" -OutFile "bore.zip"
-          Expand-Archive bore.zip -DestinationPath . -Force
+          if (Test-Path "bore.exe") { Remove-Item "bore.exe" -Force }
           
-          Write-Host "5. Настройка конфигурации RDP..."
+          # Скачиваем утилиту
+          Invoke-WebRequest "https://github.com" -OutFile "bore.zip"
+          
+          # Распаковываем через нативный tar вместо Expand-Archive (это исключит ошибку OperationStopped)
+          tar -xf bore.zip
+          
+          Write-Host "4. Настройка конфигурации RDP..."
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -value 0
           
-          Write-Host "6. Запуск виртуальной машины Podman..."
+          Write-Host "5. Запуск виртуальной машины Podman..."
           podman machine init
           podman machine start
           
-          Write-Host "7. Настройка пользователя..."
+          Write-Host "6. Настройка пользователя..."
           $password = -join ((33..126) | Get-Random -Count 15 | % {[char]$_})
           net user runneradmin $password
           
-          Write-Host "8. Запуск туннеля..."
+          Write-Host "7. Запуск туннеля..."
           Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
           
           $tunnelUrl = $null
@@ -70,5 +72,5 @@ jobs:
           
           Write-Host "::notice title=RDP Access Info::Host: $tunnelUrl | User: runneradmin | Pass: $password"
           
-          # Оставляем машину включенной на 6 часов
+          # Удерживаем сессию открытой на 6 часов
           Start-Sleep -Seconds 21600
