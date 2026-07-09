@@ -4,25 +4,31 @@ on: workflow_dispatch
 
 jobs:
   rdp:
-    runs-on: windows-11-arm
+    # Переключаемся на мощный x64 раннер, где проще запустить замену Docker
+    runs-on: windows-2025
     steps:
       - name: Deploy
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           
-          choco install googlechrome telegram vscode -y --no-progress
+          # Устанавливаем софт и Podman (замена Docker, работающая без Hyper-V в Windows)
+          choco install googlechrome telegram vscode podman-cli -y --no-progress
           
+          # Качаем правильную x86_64 версию bore
           Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
-          Expand-Archive bore.zip -DestinationPath .
+          Expand-Archive bore.zip -DestinationPath . -Force
           
+          # Включаем RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -value 0
           
+          # Генерируем пароль
           $password = -join ((33..126) | Get-Random -Count 15 | % {[char]$_})
           net user runneradmin $password
           
+          # Запускаем туннель
           Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
           
           $tunnelUrl = $null
@@ -47,4 +53,5 @@ jobs:
           
           Write-Host "::notice title=RDP Access::Host: $tunnelUrl | User: runneradmin | Pass: $password"
           
+          # Держим машину активной 6 часов
           Start-Sleep -Seconds 21600
