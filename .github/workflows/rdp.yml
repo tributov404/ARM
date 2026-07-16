@@ -1,70 +1,59 @@
-name: Windows 2022 RDP Full
+name: Windows RDP Full
 
 on: workflow_dispatch
 
 jobs:
   rdp:
-    runs-on: windows-2022
+    runs-on: windows-latest  # Использует Windows Server 2022
     steps:
-      - name: Deploy Environment
+      - name: Deploy
         shell: pwsh
         run: |
-          $ErrorActionPreference = "SilentlyContinue"
+          $ErrorActionPreference = "Stop"
           
-          Write-Host "1. Обновление подсистемы WSL..."
-          wsl --update
+          # Быстрая установка программ без вывода лишнего прогресс-бара
+          choco install googlechrome telegram vscode -y --no-progress
           
-          Write-Host "2. Установка программ (Telegram, VS Code, Podman)..."
-          choco install telegram vscode podman-cli googlechrome -y --no-progress --ignore-errors
+          # Скачивание и распаковка туннеля bore
+          Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
+          Expand-Archive bore.zip -DestinationPath .
           
-          Write-Host "3. Установка плагина podman-compose..."
-          pip install podman-compose --quiet
-          
-          Write-Host "4. Настройка конфигурации RDP..."
+          # Включение RDP в системе и настройка брандмауэра
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -value 0
           
-          Write-Host "5. Запуск виртуальной машины Podman..."
-          podman machine init
-          podman machine start
-          
-          Write-Host "6. Настройка пользователя..."
+          # Генерация надежного пароля для runneradmin
           $password = -join ((33..126) | Get-Random -Count 15 | % {[char]$_})
           net user runneradmin $password
           
-          Write-Host "7. Запуск туннеля через SSH (Pinggy) без токенов..."
-          # Запускаем фоновое SSH-подключение к pinggy.io для проброса TCP порта 3389
-          Start-Process -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:127.0.0.1:3389 a.pinggy.io" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
+          # Запуск туннеля в фоновом режиме
+          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
           
-          # Ожидаем генерации публичного адреса
+          # Ожидание получения адреса подключения
           $tunnelUrl = $null
           for ($i = 0; $i -lt 30; $i++) {
               Start-Sleep -Seconds 2
               if (Test-Path "tunnel.log") {
                   $log = Get-Content "tunnel.log" -Raw
-                  # Ищем строку с адресом в выводе pinggy
-                  if ($log -match "tcp://(a\.pinggy\.link:\d+)") {
+                  if ($log -match "listening at (bore.pub:\d+)") {
                       $tunnelUrl = $matches[1]
                       break
                   }
               }
           }
           
-          if (-not $tunnelUrl) { 
-              Write-Error "Не удалось поднять туннель через Pinggy."
-              exit 1 
-          }
+          if (-not $tunnelUrl) { Write-Host "Ошибка: не удалось запустить туннель bore."; exit 1 }
 
-          Write-Host "========================================================="
-          Write-Host "   Windows 2022 (Win 10 x64) успешно запущена!          "
-          Write-Host "========================================================="
-          Write-Host "Адрес для подключения:  $tunnelUrl"
-          Write-Host "Пользователь:           runneradmin"
-          Write-Host "Пароль:                 $password"
-          Write-Host "========================================================="
+          # Вывод данных для подключения в консоль GitHub Actions
+          Write-Host "===========  топчик Server 2022 ================"
+          Write-Host "адрес:      $tunnelUrl"
+          Write-Host "юзер:       runneradmin"
+          Write-Host "пароль:     $password"
+          Write-Host "============================================="
           
-          Write-Host "::notice title=RDP Access Info::Host: $tunnelUrl | User: runneradmin | Pass: $password"
+          # Создание красивого уведомления (Notice) на вкладке Summary
+          Write-Host "::notice title=RDP Access::Host: $tunnelUrl | User: runneradmin | Pass: $password"
           
-          # Удерживаем сессию открытой на 6 часов
-          Start-Sleep -Seconds 21600
+          # Удержание сессии активной в течение 6 часов (21600 секунд)
+          Start-Sleep -Seconds 21600 # Удерживаем как на Server 2022
