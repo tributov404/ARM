@@ -8,67 +8,82 @@ jobs:
     steps:
       - name: Setup Podman & Compose
         run: |
-          # Игнорируем битые внешние репозитории, если они упадут
+          # Обновляем списки пакетов (игнорируем мелкие проблемы с репозиториями)
           sudo apt-get update --allow-releaseinfo-change || true
-          
-          # На ubuntu-22.04 podman уже есть, доставляем только нужные утилиты
-          sudo apt-get install -y podman-docker python3-pip unzip || true
-          
-          # Установка podman-compose через pip
+
+          # Устанавливаем Podman + инструменты
+          sudo apt-get install -y podman-docker python3-pip
+
+          # Устанавливаем podman-compose
           pip3 install podman-compose
 
       - name: Deploy Bore & SSH
         run: |
-          # Скачивание корректного ZIP-архива bore для Linux
-          curl -L "https://github.com" -o bore.zip
-          unzip bore.zip
-          chmod +x bore
+          set -euo pipefail
 
-          # Установка пароля для пользователя runner
+          # === Скачивание bore (последняя версия) ===
+          echo "Получаем последнюю версию bore..."
+          BORE_RELEASE=$(curl -s https://api.github.com/repos/ekzhang/bore/releases/latest | grep -o '"tag_name": "[^"]*' | cut -d'"' -f4)
+          echo "Скачиваем bore ${BORE_RELEASE} для Linux x86_64..."
+
+          curl -L -o bore.tar.gz "https://github.com/ekzhang/bore/releases/download/${BORE_RELEASE}/bore-${BORE_RELEASE}-x86_64-unknown-linux-musl.tar.gz"
+
+          tar -xzf bore.tar.gz
+          rm -f bore.tar.gz
+          chmod +x bore
+          echo "bore успешно установлен"
+
+          # === Настройка SSH ===
+          echo "Настраиваем пароль для пользователя runner..."
           PASSWORD=$(openssl rand -base64 12)
           echo "runner:$PASSWORD" | sudo chpasswd
 
-          # Настройка SSH-сервера для авторизации по паролю
-          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          # Включаем авторизацию по паролю
+          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
+          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
           sudo systemctl restart ssh
 
-          # Запуск туннеля bore в фоновом режиме на порт SSH (22)
+          # === Запуск туннеля bore ===
+          echo "Запускаем туннель bore на порт 22..."
           ./bore local 22 --to bore.pub > tunnel.log 2>&1 &
 
-          # Ожидание получения адреса подключения
+          # Ждём адрес туннеля (максимум ~1 минута)
           TUNNEL_URL=""
           for i in {1..30}; do
               sleep 2
               if [ -f tunnel.log ]; then
                   LOG=$(cat tunnel.log)
                   if [[ $LOG =~ listening\ at\ (bore.pub:[0-9]+) ]]; then
-                      TUNNEL_URL=${BASH_REMATCH}
+                      TUNNEL_URL=${BASH_REMATCH[1]}
                       break
                   fi
               fi
           done
 
           if [ -z "$TUNNEL_URL" ]; then
-              echo "Ошибка: не удалось запустить туннель bore."
+              echo "❌ Ошибка: не удалось получить адрес туннеля bore"
               cat tunnel.log
               exit 1
           fi
 
-          # Извлечение хоста и порта для удобства команды SSH
-          HOST=$(echo $TUNNEL_URL | cut -d':' -f1)
-          PORT=$(echo $TUNNEL_URL | cut -d':' -f2)
+          HOST=$(echo "$TUNNEL_URL" | cut -d':' -f1)
+          PORT=$(echo "$TUNNEL_URL" | cut -d':' -f2)
 
-          # Вывод данных для подключения в консоль GitHub Actions
-          echo "===========  топчик Ubuntu 22.04 с Podman ================"
-          echo "Адрес:      $TUNNEL_URL"
-          echo "Юзер:       runner"
-          echo "Пароль:     $PASSWORD"
-          echo "Команда:    ssh runner@$HOST -p $PORT"
+          # === Вывод данных для подключения ===
+          echo ""
+          echo "=========== ✅ Ubuntu 22.04 + Podman + SSH готов ==========="
+          echo "Адрес:   $TUNNEL_URL"
+          echo "Пользователь: runner"
+          echo "Пароль:  $PASSWORD"
+          echo ""
+          echo "Команда для подключения:"
+          echo "ssh runner@$HOST -p $PORT"
           echo "=========================================================="
+          echo ""
 
-          # Создание уведомления на вкладке Summary
-          echo "::notice title=SSH Access::ssh runner@$HOST -p $PORT | Pass: $PASSWORD"
+          # Уведомление в Summary
+          echo "::notice title=SSH Access::ssh runner@$HOST -p $PORT | Пароль: $PASSWORD"
 
-          # Удержание сессии активной в течение 6 часов (21600 секунд)
+          # Держим раннер живым 6 часов
+          echo "Раннер будет доступен в течение 6 часов..."
           sleep 21600
