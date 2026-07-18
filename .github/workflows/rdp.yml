@@ -12,16 +12,17 @@ jobs:
           sudo apt-get update --allow-releaseinfo-change || true
           
           # На ubuntu-22.04 podman уже есть, доставляем только нужные утилиты
-          sudo apt-get install -y podman-docker python3-pip || true
+          sudo apt-get install -y podman-docker python3-pip unzip || true
           
           # Установка podman-compose через pip
           pip3 install podman-compose
 
       - name: Deploy Bore & SSH
         run: |
-          # Скачивание с принудительным сохранением в файл bore.tar.gz (-o)
-          curl -L "https://github.com" -o bore.tar.gz
-          tar -xzf bore.tar.gz
+          # Скачивание корректного ZIP-архива bore для Linux
+          curl -L "https://github.com" -o bore.zip
+          unzip bore.zip
+          chmod +x bore
 
           # Установка пароля для пользователя runner
           PASSWORD=$(openssl rand -base64 12)
