@@ -19,9 +19,9 @@ jobs:
 
       - name: Deploy Bore & SSH
         run: |
-          # Скачивание и распаковка туннеля bore для Linux
-          curl -LO https://github.com
-          tar -xzf bore-v0.5.1-x86_64-unknown-linux-musl.tar.gz
+          # Скачивание с принудительным сохранением в файл bore.tar.gz (-o)
+          curl -L "https://github.com" -o bore.tar.gz
+          tar -xzf bore.tar.gz
 
           # Установка пароля для пользователя runner
           PASSWORD=$(openssl rand -base64 12)
