@@ -4,12 +4,16 @@ on: workflow_dispatch
 
 jobs:
   ssh-podman:
-    runs-on: ubuntu-22.04  # Фиксируем версию на Ubuntu 22.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Setup Podman & Compose
         run: |
-          sudo apt-get update
-          sudo apt-get install -y podman podman-docker
+          # Игнорируем битые внешние репозитории, если они упадут
+          sudo apt-get update --allow-releaseinfo-change || true
+          
+          # На ubuntu-22.04 podman уже есть, доставляем только нужные утилиты
+          sudo apt-get install -y podman-docker python3-pip || true
+          
           # Установка podman-compose через pip
           pip3 install podman-compose
 
