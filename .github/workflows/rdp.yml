@@ -8,60 +8,51 @@ jobs:
     steps:
       - name: Setup Podman & Compose
         run: |
-          # Обновляем списки пакетов (игнорируем мелкие проблемы с репозиториями)
           sudo apt-get update --allow-releaseinfo-change || true
-
-          # Устанавливаем Podman + инструменты
           sudo apt-get install -y podman-docker python3-pip
-
-          # Устанавливаем podman-compose
           pip3 install podman-compose
 
       - name: Deploy Bore & SSH
         run: |
           set -euo pipefail
 
-          # === Скачивание bore (последняя версия) ===
+          # === Скачивание bore (всегда свежая версия) ===
           echo "Получаем последнюю версию bore..."
           BORE_RELEASE=$(curl -s https://api.github.com/repos/ekzhang/bore/releases/latest | grep -o '"tag_name": "[^"]*' | cut -d'"' -f4)
-          echo "Скачиваем bore ${BORE_RELEASE} для Linux x86_64..."
-
+          
+          echo "Скачиваем bore ${BORE_RELEASE}..."
           curl -L -o bore.tar.gz "https://github.com/ekzhang/bore/releases/download/${BORE_RELEASE}/bore-${BORE_RELEASE}-x86_64-unknown-linux-musl.tar.gz"
-
+          
           tar -xzf bore.tar.gz
-          rm -f bore.tar.gz
           chmod +x bore
-          echo "bore успешно установлен"
+          echo "bore готов к использованию"
 
           # === Настройка SSH ===
-          echo "Настраиваем пароль для пользователя runner..."
           PASSWORD=$(openssl rand -base64 12)
           echo "runner:$PASSWORD" | sudo chpasswd
 
-          # Включаем авторизацию по паролю
           sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
           sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
           sudo systemctl restart ssh
 
-          # === Запуск туннеля bore ===
-          echo "Запускаем туннель bore на порт 22..."
+          # === Запуск туннеля ===
           ./bore local 22 --to bore.pub > tunnel.log 2>&1 &
 
-          # Ждём адрес туннеля (максимум ~1 минута)
+          # Ожидание адреса туннеля
           TUNNEL_URL=""
           for i in {1..30}; do
               sleep 2
               if [ -f tunnel.log ]; then
                   LOG=$(cat tunnel.log)
                   if [[ $LOG =~ listening\ at\ (bore.pub:[0-9]+) ]]; then
-                      TUNNEL_URL=${BASH_REMATCH[1]}
+                      TUNNEL_URL=${BASH_REMATCH[1]}   # ← исправлено
                       break
                   fi
               fi
           done
 
           if [ -z "$TUNNEL_URL" ]; then
-              echo "❌ Ошибка: не удалось получить адрес туннеля bore"
+              echo "❌ Ошибка: не удалось получить адрес туннеля"
               cat tunnel.log
               exit 1
           fi
@@ -69,21 +60,18 @@ jobs:
           HOST=$(echo "$TUNNEL_URL" | cut -d':' -f1)
           PORT=$(echo "$TUNNEL_URL" | cut -d':' -f2)
 
-          # === Вывод данных для подключения ===
+          # === Вывод данных ===
           echo ""
-          echo "=========== ✅ Ubuntu 22.04 + Podman + SSH готов ==========="
+          echo "=========== ✅ Ubuntu 22.04 + Podman + SSH ==========="
           echo "Адрес:   $TUNNEL_URL"
-          echo "Пользователь: runner"
+          echo "Юзер:    runner"
           echo "Пароль:  $PASSWORD"
           echo ""
-          echo "Команда для подключения:"
           echo "ssh runner@$HOST -p $PORT"
-          echo "=========================================================="
+          echo "===================================================="
           echo ""
 
-          # Уведомление в Summary
-          echo "::notice title=SSH Access::ssh runner@$HOST -p $PORT | Пароль: $PASSWORD"
+          echo "::notice title=SSH Access::ssh runner@$HOST -p $PORT | Pass: $PASSWORD"
 
-          # Держим раннер живым 6 часов
-          echo "Раннер будет доступен в течение 6 часов..."
+          # Держим раннер 6 часов
           sleep 21600
