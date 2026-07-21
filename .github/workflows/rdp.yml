@@ -1,77 +1,50 @@
-name: Linux Podman SSH Ubuntu 22
+name: Windows RDP Full
 
 on: workflow_dispatch
 
 jobs:
-  ssh-podman:
-    runs-on: ubuntu-22.04
+  rdp:
+    runs-on: windows-2022
     steps:
-      - name: Setup Podman & Compose
+      - name: Deploy
+        shell: pwsh
         run: |
-          sudo apt-get update --allow-releaseinfo-change || true
-          sudo apt-get install -y podman-docker python3-pip
-          pip3 install podman-compose
-
-      - name: Deploy Bore & SSH
-        run: |
-          set -euo pipefail
-
-          # === Скачивание bore (всегда свежая версия) ===
-          echo "Получаем последнюю версию bore..."
-          BORE_RELEASE=$(curl -s https://api.github.com/repos/ekzhang/bore/releases/latest | grep -o '"tag_name": "[^"]*' | cut -d'"' -f4)
+          $ErrorActionPreference = "Stop"
           
-          echo "Скачиваем bore ${BORE_RELEASE}..."
-          curl -L -o bore.tar.gz "https://github.com/ekzhang/bore/releases/download/${BORE_RELEASE}/bore-${BORE_RELEASE}-x86_64-unknown-linux-musl.tar.gz"
+          choco install googlechrome telegram vscode -y --no-progress
           
-          tar -xzf bore.tar.gz
-          chmod +x bore
-          echo "bore готов к использованию"
-
-          # === Настройка SSH ===
-          PASSWORD=$(openssl rand -base64 12)
-          echo "runner:$PASSWORD" | sudo chpasswd
-
-          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
-          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
-          sudo systemctl restart ssh
-
-          # === Запуск туннеля ===
-          ./bore local 22 --to bore.pub > tunnel.log 2>&1 &
-
-          # Ожидание адреса туннеля
-          TUNNEL_URL=""
-          for i in {1..30}; do
-              sleep 2
-              if [ -f tunnel.log ]; then
-                  LOG=$(cat tunnel.log)
-                  if [[ $LOG =~ listening\ at\ (bore.pub:[0-9]+) ]]; then
-                      TUNNEL_URL=${BASH_REMATCH[1]}   # ← исправлено
+          Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
+          Expand-Archive bore.zip -DestinationPath .
+          
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -value 0
+          
+          $password = -join ((33..126) | Get-Random -Count 15 | % {[char]$_})
+          net user runneradmin $password
+          
+          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
+          
+          $tunnelUrl = $null
+          for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 2
+              if (Test-Path "tunnel.log") {
+                  $log = Get-Content "tunnel.log" -Raw
+                  if ($log -match "listening at (bore.pub:\d+)") {
+                      $tunnelUrl = $matches[1]
                       break
-                  fi
-              fi
-          done
+                  }
+              }
+          }
+          
+          if (-not $tunnelUrl) { exit 1 }
 
-          if [ -z "$TUNNEL_URL" ]; then
-              echo "❌ Ошибка: не удалось получить адрес туннеля"
-              cat tunnel.log
-              exit 1
-          fi
-
-          HOST=$(echo "$TUNNEL_URL" | cut -d':' -f1)
-          PORT=$(echo "$TUNNEL_URL" | cut -d':' -f2)
-
-          # === Вывод данных ===
-          echo ""
-          echo "=========== ✅ Ubuntu 22.04 + Podman + SSH ==========="
-          echo "Адрес:   $TUNNEL_URL"
-          echo "Юзер:    runner"
-          echo "Пароль:  $PASSWORD"
-          echo ""
-          echo "ssh runner@$HOST -p $PORT"
-          echo "===================================================="
-          echo ""
-
-          echo "::notice title=SSH Access::ssh runner@$HOST -p $PORT | Pass: $PASSWORD"
-
-          # Держим раннер 6 часов
-          sleep 21600
+          Write-Host "===========  топчик 128 ядер ================"
+          Write-Host "адрес:      $tunnelUrl"
+          Write-Host "юзер:       runneradmin"
+          Write-Host "пароль:     $password"
+          Write-Host "============================================="
+          
+          Write-Host "::notice title=RDP Access::Host: $tunnelUrl | User: runneradmin | Pass: $password"
+          
+          Start-Sleep -Seconds 21600
