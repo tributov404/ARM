@@ -25,6 +25,46 @@ jobs:
           $password = -join ((33..126) | Get-Random -Count 15 | % {[char]$_})
           net user runneradmin $password
 
+          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -RedirectStandardError "bore_error.log" -WindowStyle Hidden
+          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 8080 --to bore.pub" -RedirectStandardOutput "web_tunnel.log" -RedirectStandardError "web_error.log" -WindowStyle Hidden
+          
+          $tunnelUrl = $null
+          $webTunnelUrl = $null
+          for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 2
+              if (Test-Path "tunnel.log") {
+                  $log = Get-Content "tunnel.log" -Raw
+                  if ($log -match "listening at (bore.pub:\d+)") {
+                      $tunnelUrl = $matches[1]
+                  }
+              }
+              if (Test-Path "web_tunnel.log") {
+                  $log = Get-Content "web_tunnel.log" -Raw
+                  if ($log -match "listening at (bore.pub:\d+)") {
+                      $webTunnelUrl = $matches[1]
+                  }
+              }
+              if ($tunnelUrl -and $webTunnelUrl) { break }
+          }
+          
+          if (-not $tunnelUrl) {
+              Write-Host "ERROR: Failed to get tunnel URL"
+              exit 1
+          }
+
+          Write-Host ""
+          Write-Host "============================================="
+          Write-Host "  ДАННЫЕ ДЛЯ ПОДКЛЮЧЕНИЯ К RDP"
+          Write-Host "============================================="
+          Write-Host "адрес:      $tunnelUrl"
+          Write-Host "юзер:       runneradmin"
+          Write-Host "пароль:     $password"
+          Write-Host "============================================="
+          Write-Host ""
+          Write-Host "WEB PANEL:  $webTunnelUrl"
+          Write-Host ""
+          Write-Host "::notice title=RDP Access::Host: $tunnelUrl | User: runneradmin | Pass: $password | Web: $webTunnelUrl"
+
           $html = @"
           <!DOCTYPE html>
           <html lang="ru">
@@ -108,7 +148,7 @@ jobs:
                   <div class="info">
                       <div class="info-row">
                           <span class="label">Host</span>
-                          <span class="value">__TUNNEL_URL__</span>
+                          <span class="value">$tunnelUrl</span>
                       </div>
                       <div class="info-row">
                           <span class="label">User</span>
@@ -116,7 +156,7 @@ jobs:
                       </div>
                       <div class="info-row">
                           <span class="label">Password</span>
-                          <span class="value">__PASSWORD__</span>
+                          <span class="value">$password</span>
                       </div>
                       <div class="info-row">
                           <span class="label">Port</span>
@@ -130,52 +170,11 @@ jobs:
           </html>
           "@
 
-          $html = $html.Replace('__TUNNEL_URL__', $tunnelUrl).Replace('__PASSWORD__', $password)
           $html | Out-File -FilePath "C:\index.html" -Encoding UTF8
 
           $listener = [System.Net.HttpListener]::new()
           $listener.Prefixes.Add("http://+:8080/")
           $listener.Start()
-
-          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -RedirectStandardError "bore_error.log" -WindowStyle Hidden
-          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 8080 --to bore.pub" -RedirectStandardOutput "web_tunnel.log" -RedirectStandardError "web_error.log" -WindowStyle Hidden
-          
-          $tunnelUrl = $null
-          $webTunnelUrl = $null
-          for ($i = 0; $i -lt 30; $i++) {
-              Start-Sleep -Seconds 2
-              if (Test-Path "tunnel.log") {
-                  $log = Get-Content "tunnel.log" -Raw
-                  if ($log -match "listening at (bore.pub:\d+)") {
-                      $tunnelUrl = $matches[1]
-                  }
-              }
-              if (Test-Path "web_tunnel.log") {
-                  $log = Get-Content "web_tunnel.log" -Raw
-                  if ($log -match "listening at (bore.pub:\d+)") {
-                      $webTunnelUrl = $matches[1]
-                  }
-              }
-              if ($tunnelUrl -and $webTunnelUrl) { break }
-          }
-          
-          if (-not $tunnelUrl) {
-              Write-Host "ERROR: Failed to get tunnel URL"
-              exit 1
-          }
-
-          Write-Host ""
-          Write-Host "============================================="
-          Write-Host "  ДАННЫЕ ДЛЯ ПОДКЛЮЧЕНИЯ К RDP"
-          Write-Host "============================================="
-          Write-Host "адрес:      $tunnelUrl"
-          Write-Host "юзер:       runneradmin"
-          Write-Host "пароль:     $password"
-          Write-Host "============================================="
-          Write-Host ""
-          Write-Host "WEB PANEL:  $webTunnelUrl"
-          Write-Host ""
-          Write-Host "::notice title=RDP Access::Host: $tunnelUrl | User: runneradmin | Pass: $password | Web: $webTunnelUrl"
 
           while ($listener.IsListening) {
               $context = $listener.GetContext()
