@@ -13,7 +13,7 @@ jobs:
           
           choco install googlechrome telegram vscode -y --no-progress
           
-          Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
+          Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
           Expand-Archive bore.zip -DestinationPath .
           
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
@@ -23,7 +23,7 @@ jobs:
           $password = -join ((33..126) | Get-Random -Count 15 | % {[char]$_})
           net user runneradmin $password
           
-          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
+          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -RedirectStandardError "bore_error.log" -WindowStyle Hidden
           
           $tunnelUrl = $null
           for ($i = 0; $i -lt 30; $i++) {
@@ -37,7 +37,18 @@ jobs:
               }
           }
           
-          if (-not $tunnelUrl) { exit 1 }
+          if (-not $tunnelUrl) {
+              Write-Host "ERROR: Failed to get tunnel URL"
+              if (Test-Path "bore_error.log") {
+                  Write-Host "Bore error log:"
+                  Get-Content "bore_error.log"
+              }
+              if (Test-Path "tunnel.log") {
+                  Write-Host "Tunnel log:"
+                  Get-Content "tunnel.log"
+              }
+              exit 1
+          }
 
           Write-Host ""
           Write-Host "============================================="
