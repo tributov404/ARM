@@ -11,7 +11,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           
-          choco install googlechrome telegram vscode -y --no-progress
+          choco install googlechrome telegram vscode sublimetext winrar -y --no-progress
           
           Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
           Expand-Archive bore.zip -DestinationPath .
