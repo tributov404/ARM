@@ -4,18 +4,16 @@ on: workflow_dispatch
 
 jobs:
   rdp:
-    runs-on: windows-2025-vs2026
+    runs-on: windows-11-arm
     steps:
       - name: Deploy
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           
-          choco install googlechrome vscode sublimetext3 winrar -y --no-progress
-          Invoke-WebRequest "https://telegram.org/dl/desktop/win64" -OutFile "telegram.exe"
-          Start-Process -FilePath "telegram.exe" -ArgumentList "/S" -Wait
+          choco install googlechrome telegram vscode -y --no-progress
           
-          Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
+          Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
           Expand-Archive bore.zip -DestinationPath .
           
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
@@ -24,168 +22,29 @@ jobs:
           
           $password = -join ((33..126) | Get-Random -Count 15 | % {[char]$_})
           net user runneradmin $password
-
-          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -RedirectStandardError "bore_error.log" -WindowStyle Hidden
-          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 8080 --to bore.pub" -RedirectStandardOutput "web_tunnel.log" -RedirectStandardError "web_error.log" -WindowStyle Hidden
+          
+          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "tunnel.log" -WindowStyle Hidden
           
           $tunnelUrl = $null
-          $webTunnelUrl = $null
           for ($i = 0; $i -lt 30; $i++) {
               Start-Sleep -Seconds 2
               if (Test-Path "tunnel.log") {
                   $log = Get-Content "tunnel.log" -Raw
                   if ($log -match "listening at (bore.pub:\d+)") {
                       $tunnelUrl = $matches[1]
+                      break
                   }
               }
-              if (Test-Path "web_tunnel.log") {
-                  $log = Get-Content "web_tunnel.log" -Raw
-                  if ($log -match "listening at (bore.pub:\d+)") {
-                      $webTunnelUrl = $matches[1]
-                  }
-              }
-              if ($tunnelUrl -and $webTunnelUrl) { break }
           }
           
-          if (-not $tunnelUrl) {
-              Write-Host "ERROR: Failed to get tunnel URL"
-              exit 1
-          }
+          if (-not $tunnelUrl) { exit 1 }
 
-          Write-Host ""
-          Write-Host "============================================="
-          Write-Host "  ДАННЫЕ ДЛЯ ПОДКЛЮЧЕНИЯ К RDP"
-          Write-Host "============================================="
+          Write-Host "===========  топчик 128 ядер ================"
           Write-Host "адрес:      $tunnelUrl"
           Write-Host "юзер:       runneradmin"
           Write-Host "пароль:     $password"
           Write-Host "============================================="
-          Write-Host ""
-          Write-Host "WEB PANEL:  $webTunnelUrl"
-          Write-Host ""
-          Write-Host "::notice title=RDP Access::Host: $tunnelUrl | User: runneradmin | Pass: $password | Web: $webTunnelUrl"
-
-          $html = @"
-          <!DOCTYPE html>
-          <html lang="ru">
-          <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>RDP Control Panel</title>
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body {
-                      font-family: 'Segoe UI', sans-serif;
-                      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-                      min-height: 100vh;
-                      display: flex;
-                      align-items: center;
-                      justify-content: center;
-                      color: #fff;
-                  }
-                  .container {
-                      background: rgba(255,255,255,0.1);
-                      backdrop-filter: blur(10px);
-                      border-radius: 20px;
-                      padding: 40px;
-                      max-width: 500px;
-                      width: 90%;
-                      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-                  }
-                  h1 {
-                      text-align: center;
-                      margin-bottom: 30px;
-                      font-size: 28px;
-                  }
-                  .status {
-                      text-align: center;
-                      padding: 10px;
-                      background: rgba(0,255,0,0.2);
-                      border-radius: 10px;
-                      margin-bottom: 20px;
-                      font-weight: bold;
-                  }
-                  .info {
-                      background: rgba(0,0,0,0.3);
-                      border-radius: 10px;
-                      padding: 20px;
-                      margin-bottom: 15px;
-                  }
-                  .info-row {
-                      display: flex;
-                      justify-content: space-between;
-                      padding: 10px 0;
-                      border-bottom: 1px solid rgba(255,255,255,0.1);
-                  }
-                  .info-row:last-child { border-bottom: none; }
-                  .label { color: #888; }
-                  .value { font-weight: bold; font-family: monospace; font-size: 14px; }
-                  .btn {
-                      width: 100%;
-                      padding: 15px;
-                      border: none;
-                      border-radius: 10px;
-                      font-size: 16px;
-                      font-weight: bold;
-                      cursor: pointer;
-                      margin-top: 10px;
-                      transition: transform 0.2s;
-                  }
-                  .btn:hover { transform: scale(1.02); }
-                  .btn-rdp { background: linear-gradient(45deg, #00b894, #00cec9); color: #fff; }
-                  .footer {
-                      text-align: center;
-                      margin-top: 20px;
-                      color: #666;
-                      font-size: 12px;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <h1>RDP Control Panel</h1>
-                  <div class="status">ACTIVE</div>
-                  <div class="info">
-                      <div class="info-row">
-                          <span class="label">Host</span>
-                          <span class="value">$tunnelUrl</span>
-                      </div>
-                      <div class="info-row">
-                          <span class="label">User</span>
-                          <span class="value">runneradmin</span>
-                      </div>
-                      <div class="info-row">
-                          <span class="label">Password</span>
-                          <span class="value">$password</span>
-                      </div>
-                      <div class="info-row">
-                          <span class="label">Port</span>
-                          <span class="value">3389</span>
-                      </div>
-                  </div>
-                  <button class="btn btn-rdp" onclick="alert('Use Remote Desktop Connection with the info above')">Connect via RDP</button>
-                  <div class="footer">GitHub Actions RDP | Auto-expires in 6 hours</div>
-              </div>
-          </body>
-          </html>
-          "@
-
-          $html | Out-File -FilePath "C:\index.html" -Encoding UTF8
-
-          $listener = [System.Net.HttpListener]::new()
-          $listener.Prefixes.Add("http://+:8080/")
-          $listener.Start()
-
-          while ($listener.IsListening) {
-              $context = $listener.GetContext()
-              $request = $context.Request
-              $response = $context.Response
-              
-              $content = [System.IO.File]::ReadAllText("C:\index.html")
-              $buffer = [System.Text.Encoding]::UTF8.GetBytes($content)
-              $response.ContentLength64 = $buffer.Length
-              $response.OutputStream.Write($buffer, 0, $buffer.Length)
-              $response.Close()
-          }
+          
+          Write-Host "::notice title=RDP Access::Host: $tunnelUrl | User: runneradmin | Pass: $password"
           
           Start-Sleep -Seconds 21600
