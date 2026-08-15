@@ -11,7 +11,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           
-          choco install googlechrome vscode sublimetext winrar -y --no-progress
+          choco install googlechrome vscode sublimetext3 winrar -y --no-progress
           Invoke-WebRequest "https://telegram.org/dl/desktop/win64" -OutFile "telegram.exe"
           Start-Process -FilePath "telegram.exe" -ArgumentList "/S" -Wait
           
